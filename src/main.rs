@@ -1,31 +1,47 @@
-use std::{env, error::Error};
-
-use openai_api_rs::v1::{
-	api::OpenAIClient,
-	chat_completion::{self, ChatCompletionRequest},
-	common::GPT4_O,
+mod chatter;
+use chatter::*;
+use std::{
+	env,
+	net::{Ipv4Addr, TcpListener},
 };
+
+use openai_api_rs::v1::api::OpenAIClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let api_key = env::var("OPENAI_API_KEY").unwrap().to_string();
-	let mut client = OpenAIClient::builder().with_api_key(api_key).build()?;
-	let req = ChatCompletionRequest::new(
-		GPT4_O.to_string(),
-		vec![chat_completion::ChatCompletionMessage {
-			role: chat_completion::MessageRole::user,
-			content: chat_completion::Content::Text(String::from("What is bitcoin?")),
-			name: None,
-			tool_calls: None,
-			tool_call_id: None,
-		}],
-	);
+	let api_key: String = env::var("OPENAI_API_KEY").unwrap().to_string();
+	let website_ip: Ipv4Addr = Ipv4Addr::new(1, 1, 1, 1);
 
-	let result = client.chat_completion(req).await.unwrap();
-	println!("Content: {:?}", result.choices[0].message.content);
+	let listener = TcpListener::bind("0.0.0.0:8080")?;
+	let mut connections: u64 = 0;
 
-	for (key, value) in client.headers.unwrap().iter() {
-		println!("{}: {:?}", key, value);
+	for mut stream in listener.incoming().filter_map(|c| c.ok()) {
+		if stream.peer_addr().unwrap().is_ipv4()
+			&& stream
+				.peer_addr()
+				.unwrap()
+				.ip()
+				.to_canonical()
+				.eq(&website_ip)
+		//TODO! ipv6
+		{
+			todo!();
+		}
+		connections += 1;
+		println!(
+			"connection num: {} from: {}",
+			connections,
+			stream.peer_addr().ok().unwrap().to_string()
+		);
+
+		let val = api_key.clone();
+
+		_ = tokio::spawn(async move {
+			let client = OpenAIClient::builder().with_api_key(val).build().unwrap();
+			run(client, &mut stream).await;
+			println!("finished connection num: {}", connections);
+		});
 	}
+
 	Ok(())
 }
